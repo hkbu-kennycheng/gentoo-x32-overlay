@@ -24,14 +24,32 @@ Patches in `patches/<category>/<package-ver>/` are auto-applied by `eapply_user`
 Test changes in the x32 container:
 
 ```bash
+# sync portage tree
+podman exec x32-openmp-test bash -c 'emerge-webrsync'
+
+# emerge eselect-repository to get the latest overlays
+podman exec x32-openmp-test bash -c 'emerge eselect-repository'
+
+# add x32-overlay repository
+podman exec x32-openmp-test bash -c 'eselect repository add x32-overlay git https://github.com/hkbu-kennycheng/x32-overlay.git'
+
+# sync x32-overlay
+podman exec x32-openmp-test bash -c 'emerge --sync x32-overlay'
+
 # Run commands in the active container
 podman exec x32-openmp-test bash -c 'emerge --oneshot <package>'
 
 # Check build logs
 podman exec x32-openmp-test bash -c 'tail -20 /tmp/<log-file>'
+
+# emerge gentoolkit to get `equery` for file listing
+podman exec x32-openmp-test bash -c 'emerge gentoolkit'
+
+# verify package file with `file`
+podman exec x32-openmp-test bash -c 'equery files <package> | grep libx32 | xargs file'
 ```
 
-The container `x32-openmp-test` is based on `kennycheng/gentoo-stage3:x32-systemd` and has:
+The container `x32-openmp-test` is based on `docker.io/kennycheng/gentoo-stage4:x32-systemd` and has:
 - `/etc/portage/patches` bind-mounted to `./patches`
 - `/etc/portage/package.mask` bind-mounted to `./package.mask`
 - `/etc/portage/package.use` bind-mounted to `./package.use`
