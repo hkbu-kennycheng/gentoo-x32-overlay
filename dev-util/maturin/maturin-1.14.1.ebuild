@@ -3,11 +3,13 @@
 
 EAPI=8
 
+DISTUTILS_USE_PEP517=setuptools
+DISTUTILS_UPSTREAM_PEP517=standalone
 PYTHON_COMPAT=( python3_{12..15} python3_{14..15}t )
 RUST_MIN_VER=1.89.0
 RUST_MULTILIB=1
 
-inherit cargo rust-toolchain flag-o-matic shell-completion toolchain-funcs x32-rust
+inherit cargo distutils-r1 flag-o-matic shell-completion toolchain-funcs x32-rust
 
 DESCRIPTION="Build and publish crates with pyo3, rust-cpython and cffi bindings"
 HOMEPAGE="https://www.maturin.rs/"
@@ -26,8 +28,7 @@ LICENSE+="
 " # crates
 SLOT="0"
 KEYWORDS="amd64 arm arm64 ~loong ~mips ppc ppc64 ~riscv ~s390 ~sparc x86"
-IUSE="abi_x86_x32 abi_x86_64 doc +ssl test"
-REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )"
+IUSE="doc +ssl test"
 RESTRICT="!test? ( test )"
 
 RDEPEND="
@@ -40,9 +41,9 @@ BDEPEND="
 	virtual/pkgconfig
 	doc? ( >=app-text/mdbook-0.5 )
 	test? (
-		dev-python/boltons
-		dev-python/cffi
-		dev-python/virtualenv
+		dev-python/boltons[${PYTHON_USEDEP}]
+		dev-python/cffi[${PYTHON_USEDEP}]
+		dev-python/virtualenv[${PYTHON_USEDEP}]
 		dev-vcs/git
 		elibc_musl? ( dev-util/patchelf )
 	)
@@ -50,12 +51,14 @@ BDEPEND="
 
 QA_FLAGS_IGNORED="usr/bin/${PN}"
 
-pkg_setup() {
-	rust_pkg_setup
-}
-
 src_prepare() {
-	default
+	distutils-r1_src_prepare
+
+	# we build the Rust executable (just once) via cargo_src_compile
+	sed -i -e '/setuptools_rust/d' -e '/rust_extensions/d' setup.py || die
+
+	# Patch vendored ring crate for x32 (ILP32) compatibility
+	x32_rust_patch_ring_vendor
 
 	if use test; then
 		# used to prevent use of network during tests, and silence pip
@@ -79,12 +82,6 @@ src_prepare() {
 		git add . || die
 		git commit -qm init || die
 	fi
-
-	# Patch vendored ring crate for x32 (ILP32) compatibility
-	x32_rust_patch_ring_vendor
-
-	# Remove setuptools_rust and rust_extensions metadata for pure Cargo build
-	sed -i -e '/setuptools_rust/d' -e '/rust_extensions/d' setup.py || die
 }
 
 src_configure() {
@@ -96,31 +93,29 @@ src_configure() {
 		append-cflags $(test-flags-CC -march=z10)
 }
 
-src_compile() {
-	# Export x32 cross-compilation env (CARGO_BUILD_TARGET etc.)
+python_compile_all() {
+	# Export x32 cross-compilation env (CARGO_BUILD_TARGET etc.);
+	# no-op on non-x32 ABIs.
 	x32_rust_export_env
 
+	# we build the Rust executable (just once) via cargo_src_compile
 	cargo_src_compile
 
-	# Build documentation only for AMD64 (native), skip for x32 cross-compile
-	if use abi_x86_x32 && [[ ${ABI} == x32 ]]; then
-		ewarn "Documentation build skipped for x32 cross-compiled target"
-	else
+	# Documentation build requires mdbook; skip when cross-compiling
+	# (the x32 host is native, so this runs on x32 hosts as well).
+	if ! tc-is-cross-compiler; then
 		use !doc || mdbook build -d "${T}"/html guide || die
-	fi
 
-	# Generate shell completions only for native ABI (not cross-compiled x32)
-	if use abi_x86_x32 && [[ ${ABI} == x32 ]]; then
-		ewarn "Shell completions skipped due to cross-compilation for x32"
-	elif ! tc-is-cross-compiler; then
 		local maturin=$(cargo_target_dir)/maturin
 		"${maturin}" completions bash > "${T}"/${PN} || die
 		"${maturin}" completions fish > "${T}"/${PN}.fish || die
 		"${maturin}" completions zsh > "${T}"/_${PN} || die
+	else
+		ewarn "shell completion files were skipped due to cross-compilation"
 	fi
 }
 
-src_test() {
+python_test() {
 	local -x MATURIN_TEST_PYTHON=${EPYTHON}
 	local -x PIP_CONFIG_FILE=${T}/pip.conf
 	local -x VIRTUALENV_SYSTEM_SITE_PACKAGES=1
@@ -161,22 +156,16 @@ src_test() {
 	cargo_src_test
 }
 
-src_install() {
+python_install_all() {
 	# Install the maturin binary that was built by cargo
-	cargo_src_install
+	dobin "$(cargo_target_dir)"/maturin
 
-	# Install documentation files
 	dodoc Changelog.md README.md
+	use doc && dodoc -r "${T}"/html
 
-	# Install shell completions only for native ABI
-	if use abi_x86_x32 && [[ ${ABI} == x32 ]]; then
-		ewarn "Shell completions skipped due to cross-compilation for x32"
-	elif ! tc-is-cross-compiler; then
+	if ! tc-is-cross-compiler; then
 		dobashcomp "${T}"/${PN}
 		dofishcomp "${T}"/${PN}.fish
 		dozshcomp "${T}"/_${PN}
 	fi
-
-	# Install html docs
-	use doc && dodoc -r "${T}"/html
 }

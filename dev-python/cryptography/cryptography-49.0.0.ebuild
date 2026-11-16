@@ -9,9 +9,6 @@ PYPI_VERIFY_REPO=https://github.com/pyca/cryptography
 PYTHON_COMPAT=( python3_{12..15} python3_{14,15}t )
 PYTHON_REQ_USE="threads(+)"
 
-IUSE="abi_x86_x32 abi_x86_64"
-REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )"
-
 CARGO_OPTIONAL=yes
 RUST_MIN_VER="1.83.0"
 CRATES="
@@ -49,7 +46,7 @@ CRATES="
 	vcpkg@0.2.15
 "
 
-inherit cargo distutils-r1 flag-o-matic pypi
+inherit cargo distutils-r1 flag-o-matic multiprocessing pypi x32-rust
 
 VEC_P=cryptography_vectors-$(ver_cut 1-3)
 DESCRIPTION="Library providing cryptographic recipes and primitives"
@@ -73,6 +70,8 @@ LICENSE+="
 "
 SLOT="0"
 KEYWORDS="amd64 arm arm64 ~loong ~mips ppc ppc64 ~riscv ~s390 ~sparc x86"
+IUSE="abi_x86_x32 abi_x86_64"
+REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )"
 
 RDEPEND="
 	>=dev-libs/openssl-1.0.2o-r6:0=
@@ -132,16 +131,14 @@ python_configure_all() {
 }
 
 python_compile() {
-	if [[ "${ABI}" = x32 ]]; then
-		export PKG_CONFIG_SYSROOT_DIR=/
-		export PYO3_CROSS_LIB_DIR="/usr/lib/${EPYTHON}"
-		export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnux32
-		DISTUTILS_ARGS=( --target x86_64-unknown-linux-gnux32 )
+	if x32_rust_is_x32; then
+		x32_rust_export_env
+		DISTUTILS_ARGS=( --target "${X32_RUST_TARGET}" )
 		# Per-impl wheel dir: ${T} is shared across python implementations, so a
 		# single dir would make the glob pick up wheels built for earlier impls.
 		local wheel_dir="${T}/wheels-${EPYTHON}"
 		maturin pep517 build-wheel -i ${EPYTHON} --compatibility off \
-			--target x86_64-unknown-linux-gnux32 \
+			--target "${X32_RUST_TARGET}" \
 			--auditwheel=skip \
 			--jobs="$(makeopts_jobs)" \
 			--out "${wheel_dir}" \

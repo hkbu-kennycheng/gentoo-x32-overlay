@@ -47,7 +47,7 @@ CRATES="
 	vcpkg@0.2.15
 "
 
-inherit cargo distutils-r1 flag-o-matic pypi
+inherit cargo distutils-r1 flag-o-matic multiprocessing pypi
 
 VEC_P=cryptography_vectors-$(ver_cut 1-3)
 DESCRIPTION="Library providing cryptographic recipes and primitives"
@@ -143,7 +143,7 @@ python_compile() {
 			--target x86_64-unknown-linux-gnux32 \
 			--auditwheel=skip \
 			--jobs="$(makeopts_jobs)" \
-        	$(in_iuse debug && usex debug '--profile=dev' '')
+		$(in_iuse debug && usex debug '--profile=dev' '')
 	fi
 	distutils-r1_python_compile
 }

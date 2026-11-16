@@ -36,8 +36,23 @@ profiles/x32/               # x32 profile: eapi, package.mask/, package.use/, pa
 - `package.use/` — keyword-specific USE flags (cairo/libglvnd `X`, freetype `harfbuzz`, libaom SIMD off)
 - `patches/` — x32 user patches in `eapply_user` layout: `patches/<category>/<pkg-version>/x32.patch`. Version-agnostic symlinks (e.g. `app-misc/jq` -> `jq-1.8.2`) keep minor `::gentoo` bumps working.
 - `profile.bashrc`:
-  - `pre_src_prepare` symlinks `/etc/portage/patches` to the overlay patch tree (when not already present) and applies `${CATEGORY}/{${P},${PF},${PN}}` patches directly if the symlink is absent.
-  - `post_src_prepare` initializes a transient git repo in `${S}` when `X32_GIT_PATCH=1` for rapid patch creation (`git diff` against pristine sources).
+  - `pre_src_prepare` applies `${CATEGORY}/${P}` and `${CATEGORY}/${PN}`
+    patches directly when `/etc/portage/patches` does not resolve to the
+    overlay patch tree (eapply_user covers that case). Idempotent: a
+    per-`${PF}` marker in `${T}` guards against the double invocation caused
+    by nested `src_prepare` chains, and `realpath` dedup handles
+    `${PN}`-symlink-to-`${P}` collisions.
+  - `post_src_prepare` initializes a transient git repo in `${S}` when
+    `X32_GIT_PATCH=1` for rapid patch creation (`git diff` against pristine
+    sources).
+- `profiles.desc` + `x32/parent`: makes the profile selectable via
+  `eselect profile` (`x32-overlay:x32`, inherits
+  `gentoo:default/linux/amd64/23.0/x32/systemd`).
+- `make.defaults`: `ABI_X86="x32 64"` (x32-native hosts still need 64-bit
+  enabled for packages with `REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )"`).
+- Symlinked `/etc/portage/patches` cannot be created from `src_prepare`
+  (runs unprivileged under `FEATURES=userpriv`); it must be set up at
+  container/system provisioning time (see `.devcontainer/Containerfile.dev`).
 
 On target systems, wire up the profile via:
 
@@ -95,10 +110,17 @@ When adding or modifying ebuilds for x32 support, follow these patterns:
 - Add `REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )"` where x32 is an alternate ABI for amd64
 
 **Rust packages:**
-- Inherit the `x32-rust` eclass: `x32_rust_export_env` exports `CARGO_BUILD_TARGET=x86_64-unknown-linux-gnux32`, `RUST_TARGET`, `PKG_CONFIG_SYSROOT_DIR=/`, `cross_compiling=yes`, and `PYO3_CROSS_LIB_DIR=/usr/lib/${EPYTHON}`; `x32_rust_patch_ring_vendor` patches vendored `ring-*` crates for ILP32 and fixes `.cargo-checksum.json` / `Cargo.lock`
-- Check `${ABI} == "x32"` to apply x32-specific settings
-- Use `DISTUTILS_ARGS=( --target x86_64-unknown-linux-gnux32 )` for maturin builds; pass `--out "${T}/wheels"` to `maturin pep517 build-wheel` and install `"${T}"/wheels/*.whl` (do not parse stdout)
-- For cryptography: set `export PKG_CONFIG_SYSROOT_DIR=/` and `PYO3_CROSS_LIB_DIR`
+- Inherit the `x32-rust` eclass: `x32_rust_is_x32` detects x32 builds;
+  `x32_rust_export_env` exports `CARGO_BUILD_TARGET=x86_64-unknown-linux-gnux32`,
+  `RUST_TARGET`, `PKG_CONFIG_SYSROOT_DIR=/`, `cross_compiling=yes`, and
+  `PYO3_CROSS_LIB_DIR=/usr/lib/${EPYTHON}`; `x32_rust_patch_ring_vendor`
+  patches vendored `ring-*` crates for ILP32 and fixes
+  `.cargo-checksum.json` / `Cargo.lock` (no-op when no ring crate is vendored)
+- Check `${ABI} == "x32"` (via `x32_rust_is_x32`) to apply x32-specific settings
+- Use `DISTUTILS_ARGS=( --target "${X32_RUST_TARGET}" )` for maturin builds;
+  pass `--out "${T}/wheels-${EPYTHON}"` to `maturin pep517 build-wheel` and
+  install `"${T}"/wheels-"${EPYTHON}"/*.whl` (per-impl dir: abi3 wheels from
+  earlier impls collide in a shared dir; do not parse stdout)
 
 **Multilib packages:**
 - Use `multilib-minimal` or `multilib-is-native-abi` patterns
@@ -129,6 +151,27 @@ When adding or modifying ebuilds for x32 support, follow these patterns:
 **General**:
 - x32 has `__ILP32__` defined; pointers are 32-bit, but the x86-64 ISA (8-byte stack slots, 64-bit GPRs)
 - `SIZEOF_VOIDP=4` distinguishes x32 from x86_64 (`SIZEOF_VOIDP=8`)
+
+## Verification (2026-11-17)
+
+All of the following were verified end-to-end in the `x32-dev-verify` container
+(`docker.io/kennycheng/gentoo-stage4:x32-systemd`):
+
+- **Dev container**: named volumes (`distfiles`, `binpkgs`, `ccache`, `gentoo`),
+  `tmpfs /var/tmp/portage:16G`, repos.conf + patches/masks/USE wiring,
+  `gentoolkit`/`pkgdev`/`pkgcheck` installed.
+- **Patch pipeline**: `eapply_user` (with `/etc/portage/patches` symlinked) and
+  the `profile.bashrc` fallback (symlink absent) each apply `x32.patch` exactly
+  once; verified on `jq-1.8.2`, `ruby-3.3.13` (via the version-agnostic
+  `dev-lang/ruby` symlink), and `openmp-22.1.8`.
+- **X32_GIT_PATCH=1**: baseline commit created in `${S}` (verified on jq).
+- **Profile selectability**: `eselect profile list` shows `x32-overlay:x32`
+  (stable, inherits the Gentoo x32 systemd profile).
+- **pkgcheck**: clean for overlay-owned issues (remaining findings are
+  upstream-inherited sparc depset resolution and keyword potentials).
+- **Builds**: `librsvg-2.58.5-r1` (x32-rust eclass adopted) and
+  `svt-av1-4.1.0` produce x32 ELF (`ELF 32-bit LSB ..., x86-64`,
+  `interpreter /libx32/ld-linux-x32.so.2`).
 
 ## Ruby-Specific Validation
 

@@ -81,3 +81,65 @@ Notes:
 - `profiles/x32/package.mask/maturin` masks upstream `dev-util/maturin-1.15.0`
   (no x32 ring patches) so dependency chains resolve to the patched overlay
   version.
+
+## Phase 2 verification (2026-11-17, `x32-dev-verify` container on stage4:x32-systemd)
+
+### Development container
+
+`.devcontainer/Containerfile.dev` + `compose.yaml` (in both `gentoo-x32-overlay`
+and `gentoo-x32-docker`) provide:
+
+- Base `docker.io/kennycheng/gentoo-stage4:x32-systemd`
+- Persistent named volumes: `distfiles`, `binpkgs`, `ccache`, `gentoo`
+- Ephemeral build dirs: `tmpfs` on `/var/tmp/portage` (16 GB)
+- Overlay registered via `/etc/portage/repos.conf/x32-overlay.conf`
+- Profile wiring: `/etc/portage/patches`, `package.mask`, `package.use` symlinks
+- Developer tooling: `app-portage/gentoolkit`, `dev-util/pkgdev`,
+  `dev-util/pkgcheck` (with `dev-libs/tree-sitter-bash[python]` USE)
+
+### Patch pipeline (all mechanisms verified)
+
+- **`eapply_user`** (canonical): with `/etc/portage/patches` symlinked to the
+  overlay patch tree, `ebuild ... unpack prepare` applies `x32.patch` exactly
+  once (verified on `app-misc/jq-1.8.2`).
+- **`profile.bashrc` `pre_src_prepare`** (fallback): with the symlink absent,
+  the ebuild's default `eapply_user` sees nothing; the hook applies the patch
+  manually, guarded by a per-`${PF}` marker file in `${T}` so the nested
+  `src_prepare` chain cannot double-apply it (verified on jq).
+- **Version-agnostic symlinks**: `dev-lang/ruby -> ruby-3.3.11` delivers the
+  coroutine fix to `ruby-3.3.13`; verified by `ebuild ruby-3.3.13.ebuild
+  unpack prepare` applying the patch into `configure.ac`.
+- **OpenMP dedup** (md5-identical): `openmp-16.0.6`, `openmp-17.0.6` symlink to
+  `../openmp-15.0.7-r2/x32.patch`; `openmp-20.1.8` symlinks to
+  `../openmp-20.1.7/x32.patch`. Verified: `ebuild openmp-22.1.8.ebuild
+  unpack prepare` applies the (unique) patch — x32-aware `-mx32` flag selection
+  lands in `LibompHandleFlags.cmake`.
+- **`X32_GIT_PATCH=1`** creates a baseline commit (`x32 baseline <PF>`) in a
+  transient git repo inside `${S}` for `git diff`-based patch development
+  (verified on jq).
+
+### Overlay profile selectability
+
+- `profiles/profiles.desc` (`amd64 x32 stable`) + `profiles/x32/parent`
+  (`gentoo:default/linux/amd64/23.0/x32/systemd`) make `x32-overlay:x32`
+  selectable via `eselect profile list` (verified in container).
+- `profiles/x32/make.defaults` sets `ABI_X86="x32 64"` so packages with
+  `REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )"` are installable by default on
+  the overlay profile.
+
+### pkgcheck QA
+
+`pkgcheck scan` on the overlay (with `repos.conf/gentoo.conf` present) reports
+only upstream-inherited findings (sparc NonsolvableDepsInStable, PotentialStable
+keywording) and tree-skew artifacts (svt-av1 `pgo`/`tools` USE flags missing
+from the container's older `use.local.desc`). Fixed on the overlay side:
+eclass doc tags, maturin restructured to `distutils-r1`, whitespace,
+`multiprocessing` inherits, `metadata.xml` remote-ids, cryptography variable
+order, `package.mask` atom syntax.
+
+### Additional verified builds
+
+| Package | Result |
+|---|---|
+| `media-libs/svt-av1-4.1.0` | builds for x32 (`COMPILE_C_ONLY=ON`); `/usr/libx32/libSvtAv1Enc.so.4.1.0` is x32 ELF |
+| `gnome-base/librsvg-2.58.5-r1` | `x32-rust` eclass adopted; `/usr/libx32/librsvg-2.so.2.50.0` + `/usr/bin/rsvg-convert` are x32 ELF (`interpreter /libx32/ld-linux-x32.so.2`) |

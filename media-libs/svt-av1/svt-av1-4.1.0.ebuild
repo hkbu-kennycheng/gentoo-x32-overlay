@@ -70,7 +70,7 @@ multilib_src_configure() {
 		-DSVT_AV1_LTO=OFF
 	)
 
-	# x32 ABI: assembly is x86-64 only, so force C-only compilation 
+	# x32 ABI: assembly is x86-64 only, so force C-only compilation
 	if [[ ${ABI} == x32 ]]; then
 		mycmakeargs+=( -DCOMPILE_C_ONLY=ON )
 	fi

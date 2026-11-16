@@ -5,7 +5,7 @@
 # @MAINTAINER:
 # Gentoo x32 project
 # @SUPPORTED_EAPIS: 8
-# @BLUFPEP-STATUS: 1
+# @BLURB: Helpers for building Rust crates for the x32 ABI
 # @DESCRIPTION:
 # Helpers for building Rust crates for the x32 ABI
 # (x86_64-unknown-linux-gnux32, ILP32 on x86-64). Provides:
@@ -89,7 +89,12 @@ x32_rust_patch_ring_vendor() {
 			[[ -n ${ring_dir} ]] && die "x32-rust: multiple ring-* crates vendored, set X32_RING_CRATE"
 			ring_dir="${d}"
 		done
-		[[ -n ${ring_dir} ]] || die "x32-rust: no ring-* crate found under ${S}/vendor"
+		# Not all Rust crates vendor ring; when none is found there is
+		# nothing to patch (only an explicit X32_RING_CRATE is required).
+		if [[ -z ${ring_dir} ]]; then
+			einfo "x32-rust: no ring-* crate vendored, skipping ring patch"
+			return 0
+		fi
 	fi
 
 	einfo "x32-rust: patching vendored ring crate: ${ring_dir##*/}"

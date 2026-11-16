@@ -144,7 +144,7 @@ python_compile() {
 			--target x86_64-unknown-linux-gnux32 \
 			--auditwheel=skip \
 			--jobs="$(makeopts_jobs)" \
-        	$(in_iuse debug && usex debug '--profile=dev' '')
+		$(in_iuse debug && usex debug '--profile=dev' '')
 	fi
 	distutils-r1_python_compile
 }

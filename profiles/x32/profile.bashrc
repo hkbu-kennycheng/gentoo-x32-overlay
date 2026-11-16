@@ -5,6 +5,14 @@
 #
 # This file is sourced into the ebuild environment via the profile-formats
 # `profile-bashrcs` mechanism (see metadata/layout.conf).
+#
+# Notes on the execution environment:
+#  * src_prepare runs unprivileged (FEATURES=userpriv), so this hook must
+#    not attempt to write under /etc. The /etc/portage/patches symlink is
+#    established at container/system setup time (see .devcontainer).
+#  * The src_prepare default chain (ebuild's own src_prepare -> default)
+#    can cause pre_src_prepare to be entered more than once per phase; all
+#    logic here is idempotent.
 
 x32_patches_dir() {
 	# Canonical location of the x32 patch tree inside this overlay.
@@ -12,45 +20,54 @@ x32_patches_dir() {
 	echo "${X32_PATCHES_DIR:-/var/db/repos/x32-overlay/profiles/x32/patches}"
 }
 
-x32_link_user_patches() {
-	# Symlink /etc/portage/patches at the overlay's patch tree so Portage's
-	# eapply_user picks up x32 patches automatically. Only create the link
-	# when /etc/portage/patches is absent (do not clobber user configuration).
+x32_apply_overlay_patches() {
+	# Fallback patch application for when /etc/portage/patches does not
+	# resolve to the overlay's patch tree. In that case eapply_user in the
+	# ebuild's default src_prepare never sees the x32 patches, so apply
+	# them manually here.
 	local patches_src="$(x32_patches_dir)"
 	local patches_dst="${EROOT}/etc/portage/patches"
 
-	[[ -d ${patches_src} ]] || return 0
+	# Only meaningful during the prepare phase.
+	[[ ${EBUILD_PHASE} == prepare ]] || return 0
 
-	if [[ ! -e ${patches_dst} && ! -L ${patches_dst} ]]; then
-		mkdir -p "${EROOT}/etc/portage" 2>/dev/null || return 0
-		if ln -snf "${patches_src}" "${patches_dst}" 2>/dev/null; then
-			einfo "Linked ${patches_dst} -> ${patches_src}"
-		fi
+	# If /etc/portage/patches resolves to the overlay patch tree (directly
+	# or via a symlink), eapply_user already applies them -- do not apply
+	# a second time.
+	if [[ -e ${patches_dst} ]]; then
+		[[ $(realpath "${patches_src}" 2>/dev/null) == \
+			$(realpath "${patches_dst}" 2>/dev/null) ]] && return 0
 	fi
-}
 
-x32_apply_overlay_patches() {
-	# Manually apply x32 patches when /etc/portage/patches is not symlinked
-	# to the overlay's patch tree (in which case eapply_user in the ebuild's
-	# default src_prepare already handles them).
-	local patches_src="$(x32_patches_dir)"
+	# Idempotency: the pre_src_prepare hook runs more than once per phase
+	# (src_prepare nesting: default -> ... -> default). A marker file in
+	# ${T} (per-${PF}) ensures each patch is applied exactly once.
+	local marker="${T}/.x32-overlay-patches"
+	[[ -f ${marker} && $(<"${marker}") == "${PF}" ]] && return 0
 
-	[[ -L ${EROOT}/etc/portage/patches ]] && return 0
-
-	local d
+	# Apply version-specific (${P}) then version-agnostic (${PN}) patch
+	# directories. Deduplicate by realpath: ${P} == ${PF} when
+	# PKG_REVISION is empty, and ${PN} is often a symlink to the
+	# versioned directory (e.g. app-misc/jq -> app-misc/jq-1.8.2).
+	local d r f seen=()
 	for d in "${patches_src}/${CATEGORY}/${P}" \
-		 "${patches_src}/${CATEGORY}/${PF}" \
 		 "${patches_src}/${CATEGORY}/${PN}"; do
-		if [[ -d ${d} ]]; then
-			local f
-			for f in "${d}"/*.patch; do
-				[[ -f ${f} ]] || continue
-				einfo "Applying x32 patch: ${f#${patches_src}/}"
-				(cd "${S}" && eapply "${f}") || \
-					die "Failed to apply x32 patch: ${f}"
-			done
-		fi
+		[[ -d ${d} ]] || continue
+		r=$(realpath "${d}" 2>/dev/null) || r=${d}
+		local dup=0 s
+		for s in "${seen[@]-}"; do
+			[[ ${s} == "${r}" ]] && { dup=1; break; }
+		done
+		[[ ${dup} == 1 ]] && continue
+		seen+=("${r}")
+		for f in "${d}"/*.patch; do
+			[[ -f ${f} ]] || continue
+			einfo "Applying x32 patch: ${f#${patches_src}/}"
+			(cd "${S}" && eapply "${f}") || \
+				die "Failed to apply x32 patch: ${f}"
+		done
 	done
+	[[ -d ${T} ]] && echo "${PF}" > "${marker}"
 	return 0
 }
 
@@ -71,7 +88,6 @@ x32_post_src_prepare() {
 }
 
 pre_src_prepare() {
-	x32_link_user_patches
 	x32_apply_overlay_patches
 	return 0
 }

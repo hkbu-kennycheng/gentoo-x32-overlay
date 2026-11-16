@@ -290,7 +290,7 @@ CRATES="
 RUST_MIN_VER="1.71.1"
 RUST_MULTILIB=1
 
-inherit cargo gnome2 multilib-minimal python-any-r1 rust-toolchain vala
+inherit cargo gnome2 multilib-minimal python-any-r1 rust-toolchain vala x32-rust
 
 DESCRIPTION="Scalable Vector Graphics (SVG) rendering library"
 HOMEPAGE="https://wiki.gnome.org/Projects/LibRsvg https://gitlab.gnome.org/GNOME/librsvg"
@@ -354,6 +354,9 @@ pkg_setup() {
 src_prepare() {
 	use vala && vala_setup
 	gnome2_src_prepare
+
+	# Patch vendored ring crate for x32 (ILP32) compatibility
+	x32_rust_patch_ring_vendor
 }
 
 src_configure() {
@@ -378,14 +381,14 @@ multilib_src_configure() {
 			# far as C parts and configure auto-detection are concerned as CHOST equals CBUILD
 			cross_compiling=yes
 		)
-	elif use amd64 && [[ ${ABI} == "x32" ]]; then
-        myconf+=(
-            # Set the rust target, which can differ from CHOST
-            RUST_TARGET="x86_64-unknown-linux-gnux32"
-            # RUST_TARGET is only honored if cross_compiling, but non-native ABIs aren't cross as
-            # far as C parts and configure auto-detection are concerned as CHOST equals CBUILD
-            cross_compiling=yes
-        )
+	elif x32_rust_is_x32; then
+		myconf+=(
+			# Set the rust target, which can differ from CHOST
+			RUST_TARGET="${X32_RUST_TARGET}"
+			# RUST_TARGET is only honored if cross_compiling, but non-native ABIs aren't cross as
+			# far as C parts and configure auto-detection are concerned as CHOST equals CBUILD
+			cross_compiling=yes
+		)
 	fi
 
 	ECONF_SOURCE=${S} \
@@ -401,6 +404,9 @@ src_compile() {
 }
 
 multilib_src_compile() {
+	# Export x32 cross-compilation env (CARGO_BUILD_TARGET etc.);
+	# no-op on non-x32 ABIs.
+	x32_rust_export_env
 	cargo_env gnome2_src_compile
 }
 

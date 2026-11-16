@@ -1,4 +1,4 @@
 # Upstream maturin has no x32 (ILP32) fixes for its vendored ring crate.
 # Force dependency chains (e.g. dev-python/cryptography) to resolve to the
 # patched dev-util/maturin from this overlay.
->=dev-util/maturin-1.15.0::gentoo
+>=dev-util/maturin-1.15.0

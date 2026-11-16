@@ -1,0 +1,6 @@
+# x32 overlay profile defaults.
+#
+# Multilib x32: x32 is the native ABI on an x32 stage4 system; 64-bit
+# (native amd64) is enabled alongside it because many ebuilds declare
+# REQUIRED_USE="abi_x86_x32? ( abi_x86_64 )".
+ABI_X86="x32 64"

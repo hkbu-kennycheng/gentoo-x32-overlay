@@ -11,11 +11,19 @@ services:
     volumes:
       # Mount the overlay checkout at the canonical repos location
       - ..:/var/db/repos/x32-overlay:z
-      # Persistent portage cache/distfiles between runs
-      - portage-cache:/var/cache/binpkgs
+      # Persistent caches between runs
       - distfiles:/var/cache/distfiles
+      - binpkgs:/var/cache/binpkgs
+      - ccache:/var/cache/ccache
+      # Persistent gentoo portage tree (survives container recreation)
+      - gentoo:/var/db/repos/gentoo
+    tmpfs:
+      # Ebuild build dirs are ephemeral
+      - /var/tmp/portage:size=16G
     command: sleep infinity
 
 volumes:
-  portage-cache:
   distfiles:
+  binpkgs:
+  ccache:
+  gentoo:
