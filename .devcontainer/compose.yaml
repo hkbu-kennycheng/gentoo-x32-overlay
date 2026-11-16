@@ -1,0 +1,21 @@
+services:
+  x32-dev:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Containerfile.dev
+    image: kennycheng/x32-dev:latest
+    container_name: x32-dev
+    hostname: x32-dev
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount the overlay checkout at the canonical repos location
+      - ..:/var/db/repos/x32-overlay:z
+      # Persistent portage cache/distfiles between runs
+      - portage-cache:/var/cache/binpkgs
+      - distfiles:/var/cache/distfiles
+    command: sleep infinity
+
+volumes:
+  portage-cache:
+  distfiles:

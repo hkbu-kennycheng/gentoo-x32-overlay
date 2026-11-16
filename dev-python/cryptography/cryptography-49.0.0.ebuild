@@ -137,18 +137,17 @@ python_compile() {
 		export PYO3_CROSS_LIB_DIR="/usr/lib/${EPYTHON}"
 		export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnux32
 		DISTUTILS_ARGS=( --target x86_64-unknown-linux-gnux32 )
-		local out
-		out=$(maturin pep517 build-wheel -i ${EPYTHON} --compatibility off \
+		maturin pep517 build-wheel -i ${EPYTHON} --compatibility off \
 			--target x86_64-unknown-linux-gnux32 \
 			--auditwheel=skip \
 			--jobs="$(makeopts_jobs)" \
-			$(in_iuse debug && usex debug '--profile=dev' '') 2>&1) || die "maturin build-wheel failed"
-		# maturin outputs the wheel path as the last line of stdout
+			--out "${T}/wheels" \
+			$(in_iuse debug && usex debug '--profile=dev' '') || die "maturin build-wheel failed"
 		local wheel_file
-		wheel_file=$(printf '%s\n' "${out}" | tail -1)
-		[[ -f "${wheel_file}" ]] || die "Wheel file not found: ${wheel_file}"
-		distutils_wheel_install "${BUILD_DIR}/install" "${wheel_file}"
-		einfo "  Installed wheel: ${wheel_file##*/}"
+		for wheel_file in "${T}"/wheels/*.whl; do
+			distutils_wheel_install "${BUILD_DIR}/install" "${wheel_file}"
+			einfo "  Installed wheel: ${wheel_file##*/}"
+		done
 	else
 		distutils-r1_python_compile
 	fi

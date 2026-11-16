@@ -306,16 +306,22 @@ rust_native_abi_install() {
 multilib_src_install() {
 	if multilib_is_native_abi; then
 		rust_native_abi_install
+	elif [[ ${ABI} == x32 ]] && use abi_x86_x32; then
+		# rust_native_abi_install() already installed the
+		# rust-std-x86_64-unknown-linux-gnux32 component into
+		# /opt/rust-bin-${SLOT}/lib/rustlib during the native ABI pass,
+		# so there is nothing left to install for the x32 ABI itself.
+		einfo "x32 std already provided by native ABI installation; skipping"
 	else
 		local rust_target
-		rust_target="$(rust_abi $(get_abi_CHOST ${v##*.}))"
-		dodir "/opt/${P}/lib/rustlib"
-		cp -vr "${WORKDIR}/rust-${PV}-${rust_target}/rust-std-${rust_target}/lib/rustlib/${rust_target}"\
-			"${ED}/opt/${P}/lib/rustlib" || die
+		rust_target="$(rust_abi $(get_abi_CHOST ${ABI}))"
+		dodir "/opt/rust-bin-${SLOT}/lib/rustlib"
+		cp -vr "${WORKDIR}/rust-std-${PV}-${rust_target}/rust-std-${rust_target}/lib/rustlib/${rust_target}"\
+			"${ED}/opt/rust-bin-${SLOT}/lib/rustlib" || die
 	fi
 
 	# BUG: installs x86_64 binary on other arches
-	rm -f "${ED}/opt/${P}/lib/rustlib/"*/bin/rust-llvm-dwp || die
+	rm -f "${ED}"/opt/rust-bin-"${SLOT}"/lib/rustlib/*/bin/rust-llvm-dwp || die
 }
 
 pkg_postinst() {

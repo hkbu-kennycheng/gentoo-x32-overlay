@@ -7,7 +7,7 @@ PYTHON_COMPAT=( python3_{12..15} python3_{14..15}t )
 RUST_MIN_VER=1.89.0
 RUST_MULTILIB=1
 
-inherit cargo rust-toolchain flag-o-matic shell-completion toolchain-funcs
+inherit cargo rust-toolchain flag-o-matic shell-completion toolchain-funcs x32-rust
 
 DESCRIPTION="Build and publish crates with pyo3, rust-cpython and cffi bindings"
 HOMEPAGE="https://www.maturin.rs/"
@@ -52,6 +52,10 @@ QA_FLAGS_IGNORED="usr/bin/${PN}"
 
 pkg_setup() {
 	rust_pkg_setup
+}
+
+src_prepare() {
+	default
 
 	if use test; then
 		# used to prevent use of network during tests, and silence pip
@@ -74,108 +78,10 @@ pkg_setup() {
 		git config --global user.name "Larry the Cow" || die
 		git add . || die
 		git commit -qm init || die
-
 	fi
-}
 
-src_prepare() {
-	default
-
-	# Apply x32 patches to ring vendor crate when building for x32 ABI
-	# or when abi_x86_x32 use flag is enabled
-	if use abi_x86_x32 || [[ ${ABI} == x32 ]]; then
-		einfo "Applying ring x32 compatibility patches..."
-
-		# Fix ring's pointer size assertions in cpu/intel.rs
-		# https://github.com/briansmith/ring/issues/398
-		python3 -c "
-intel_rs = '${S}/vendor/ring-0.17.14/src/cpu/intel.rs'
-with open(intel_rs) as f:
-    content = f.read()
-old = '#[cfg(target_arch = \"x86_64\")]\n    const _ASSUMED_POINTER_SIZE: usize = 8;'
-new = ('#[cfg(all(target_arch = \"x86_64\", target_pointer_width = \"64\"))]\n'
-       '    const _ASSUMED_POINTER_SIZE: usize = 8;\n'
-       '    #[cfg(all(target_arch = \"x86_64\", target_pointer_width = \"32\"))]\n'
-       '    const _ASSUMED_POINTER_SIZE: usize = 4;')
-content = content.replace(old, new)
-with open(intel_rs, 'w') as f:
-    f.write(content)
-" || die
-
-		# Fix Limb::BITS assertion in x86_64 mont.rs for x32 ABI compatibility
-		# On x32, Limb::BITS is 32 (pointer-sized), so 8 * 32 = 256, not 512.
-		local mont_rs="${S}/vendor/ring-0.17.14/src/arithmetic/limbs/x86_64/mont.rs"
-		python3 -c "
-mont_rs = '${S}/vendor/ring-0.17.14/src/arithmetic/limbs/x86_64/mont.rs'
-with open(mont_rs) as f:
-    content = f.read()
-content = content.replace(
-    'const _512_IS_LIMB_BITS_TIMES_8: () = assert!(8 * Limb::BITS == 512);',
-    '// x32-compatible: Limb::BITS is 32 on x32, 64 on x86_64.\n'
-    'const _512_IS_LIMB_BITS_TIMES_8: () = ();'
-)
-with open(mont_rs, 'w') as f:
-    f.write(content)
-" || die
-
-		# Patch all ring source files to use the generic fallback for x32 ABI.
-		# The x86_64 SIMD backend requires 64-bit limbs, which x32 doesn't have.
-		# We change all 'target_arch = \"x86_64\"' to
-		# 'all(target_arch = \"x86_64\", target_pointer_width = \"64\")' so the
-		# x86_64 backend is only selected on true 64-bit pointer targets.
-		python3 <<PYEOF || die
-import os
-base = '${S}/vendor/ring-0.17.14'
-old = 'target_arch = "x86_64"'
-new = 'all(target_arch = "x86_64", target_pointer_width = "64")'
-for root, dirs, files in os.walk(base):
-    for fn in files:
-        if not fn.endswith('.rs'):
-            continue
-        fpath = os.path.join(root, fn)
-        with open(fpath) as f:
-            content = f.read()
-        if old in content:
-            content = content.replace(old, new)
-            with open(fpath, 'w') as f:
-                f.write(content)
-PYEOF
-
-		# Update cargo checksum for ring to match patched files
-		# This updates both .cargo-checksum.json and Cargo.lock
-		local ring_checksum
-		ring_checksum=$(python3 <<PYEOF || die
-import hashlib, json, os
-base = '${S}/vendor/ring-0.17.14'
-files = {}
-all_content = b''
-for root, dirs, filenames in os.walk(base):
-    for fn in filenames:
-        if fn in ('.cargo-checksum.json', '.cargo_vcs_info.json'):
-            continue
-        fpath = os.path.join(root, fn)
-        relpath = os.path.relpath(fpath, base)
-        with open(fpath, 'rb') as f:
-            content = f.read()
-        files[relpath] = hashlib.sha256(content).hexdigest()
-        all_content += content
-package_checksum = hashlib.sha256(all_content).hexdigest()
-
-# Update .cargo-checksum.json with new file checksums and package checksum
-checksum_path = os.path.join(base, '.cargo-checksum.json')
-with open(checksum_path) as f:
-    checksum_data = json.load(f)
-checksum_data['files'] = files
-checksum_data['package'] = package_checksum
-with open(checksum_path, 'w') as f:
-    json.dump(checksum_data, f, separators=(',', ':'))
-
-print(package_checksum)
-PYEOF
-)
-		# Update Cargo.lock ring entry checksum
-		sed -i "/^name = \"ring\"$/,/^checksum = / s/^checksum = .*/checksum = \"${ring_checksum}\"/" "${S}/Cargo.lock" || die
-	fi
+	# Patch vendored ring crate for x32 (ILP32) compatibility
+	x32_rust_patch_ring_vendor
 
 	# Remove setuptools_rust and rust_extensions metadata for pure Cargo build
 	sed -i -e '/setuptools_rust/d' -e '/rust_extensions/d' setup.py || die
@@ -191,14 +97,8 @@ src_configure() {
 }
 
 src_compile() {
-	# Set CARGO_BUILD_TARGET for x32 cross-compilation
-	# The ring crate has pointer width issues on x32 (x86_64 arch but 32-bit pointers)
-	# Patches are applied in src_prepare
-	if use abi_x86_x32 || [[ ${ABI} == x32 ]]; then
-		export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnux32
-		export cross_compiling=yes
-		ewarn "Building for x32 ABI target: x86_64-unknown-linux-gnux32"
-	fi
+	# Export x32 cross-compilation env (CARGO_BUILD_TARGET etc.)
+	x32_rust_export_env
 
 	cargo_src_compile
 
