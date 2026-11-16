@@ -137,14 +137,17 @@ python_compile() {
 		export PYO3_CROSS_LIB_DIR="/usr/lib/${EPYTHON}"
 		export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnux32
 		DISTUTILS_ARGS=( --target x86_64-unknown-linux-gnux32 )
+		# Per-impl wheel dir: ${T} is shared across python implementations, so a
+		# single dir would make the glob pick up wheels built for earlier impls.
+		local wheel_dir="${T}/wheels-${EPYTHON}"
 		maturin pep517 build-wheel -i ${EPYTHON} --compatibility off \
 			--target x86_64-unknown-linux-gnux32 \
 			--auditwheel=skip \
 			--jobs="$(makeopts_jobs)" \
-			--out "${T}/wheels" \
+			--out "${wheel_dir}" \
 			$(in_iuse debug && usex debug '--profile=dev' '') || die "maturin build-wheel failed"
 		local wheel_file
-		for wheel_file in "${T}"/wheels/*.whl; do
+		for wheel_file in "${wheel_dir}"/*.whl; do
 			distutils_wheel_install "${BUILD_DIR}/install" "${wheel_file}"
 			einfo "  Installed wheel: ${wheel_file##*/}"
 		done

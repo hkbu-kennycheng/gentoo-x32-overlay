@@ -306,18 +306,25 @@ rust_native_abi_install() {
 multilib_src_install() {
 	if multilib_is_native_abi; then
 		rust_native_abi_install
-	elif [[ ${ABI} == x32 ]] && use abi_x86_x32; then
-		# rust_native_abi_install() already installed the
-		# rust-std-x86_64-unknown-linux-gnux32 component into
-		# /opt/rust-bin-${SLOT}/lib/rustlib during the native ABI pass,
-		# so there is nothing left to install for the x32 ABI itself.
-		einfo "x32 std already provided by native ABI installation; skipping"
 	else
 		local rust_target
 		rust_target="$(rust_abi $(get_abi_CHOST ${ABI}))"
-		dodir "/opt/rust-bin-${SLOT}/lib/rustlib"
-		cp -vr "${WORKDIR}/rust-std-${PV}-${rust_target}/rust-std-${rust_target}/lib/rustlib/${rust_target}"\
-			"${ED}/opt/rust-bin-${SLOT}/lib/rustlib" || die
+		local std_dir="${WORKDIR}/rust-std-${PV}-${rust_target}/rust-std-${rust_target}/lib/rustlib/${rust_target}"
+		if [[ -d ${std_dir} ]]; then
+			# Standalone rust-std tarball (e.g. x86_64-unknown-linux-gnux32
+			# on an amd64 host): install it next to the native toolchain.
+			dodir "/opt/rust-bin-${SLOT}/lib/rustlib"
+			cp -vr "${std_dir}" "${ED}/opt/rust-bin-${SLOT}/lib/rustlib" || die
+		elif use abi_x86_x32; then
+			# rust_native_abi_install() already installed
+			# rust-std-x86_64-unknown-linux-gnux32 into
+			# /opt/rust-bin-${SLOT}/lib/rustlib during the native ABI
+			# pass, and SRC_URI provides no other std tarballs, so
+			# there is nothing to install for the remaining ABIs.
+			einfo "No standalone rust-std tarball for ${rust_target}; std provided by native ABI pass"
+		else
+			ewarn "No rust-std tarball available for target ${rust_target}; skipping ABI ${ABI}"
+		fi
 	fi
 
 	# BUG: installs x86_64 binary on other arches

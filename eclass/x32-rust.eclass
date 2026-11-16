@@ -175,8 +175,10 @@ if os.path.exists(checksum_path):
 if os.path.exists(cargo_lock):
     with open(cargo_lock) as f:
         lock = f.read()
+    # Cargo.lock v4 registry entries include a "source" line between
+    # "version" and "checksum"; it must be matched optionally.
     lock = re.sub(
-        r'(name = "ring"\nversion = "[^"]+"\nchecksum = )"[^"]*"',
+        r'(name = "ring"\nversion = "[^"]+"\n(?:source = "[^"]*"\n)?checksum = )"[^"]*"',
         r'\g<1>"{}"'.format(package_checksum),
         lock,
     )

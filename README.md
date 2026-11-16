@@ -56,3 +56,28 @@ See `CLAUDE.md` for the development workflow, x32 ebuild patterns, and
 container-based testing instructions. A devcontainer is provided in
 `.devcontainer/` (`compose.yaml` + `Containerfile.dev`) based on
 `docker.io/kennycheng/gentoo-stage4:x32-systemd`.
+
+## Verified builds (2026-11-16, `x32-dev-verify` container on stage4:x32-systemd)
+
+`emerge -pv` resolved `dev-lang/rust-bin dev-util/maturin dev-python/cryptography
+gnome-base/librsvg media-libs/svt-av1 app-misc/jq` without conflicts. All built
+binaries are genuine x32 ELF (`ELF 32-bit LSB ..., x86-64 ...,
+interpreter /libx32/ld-linux-x32.so.2`):
+
+| Package | Result |
+|---|---|
+| `app-misc/jq-1.8.2` | `x32.patch` auto-applied via `/etc/portage/patches` symlink (eapply_user) |
+| `dev-util/maturin-1.14.1` | `x32-rust.eclass` patched vendored `ring-0.17.14` (intel.rs, mont.rs, cfg gates, `.cargo-checksum.json`, `Cargo.lock`); `maturin 1.14.1` runs |
+| `dev-python/cryptography-49.0.0` | `maturin pep517 build-wheel --out "${T}/wheels-${EPYTHON}"`; wheels install for all impls; `import cryptography` + RSA keygen OK |
+| `dev-lang/rust-bin-1.96.1` | multilib install fix: both x86_64 ABIs' std land under `/opt/rust-bin-1.96.1/lib/rustlib`; `rustc --target x86_64-unknown-linux-gnux32` emits x32 ELF |
+
+Notes:
+
+- On an x32-native host, the `ABI_X86="x32 64"` multilib merge of `rust-bin`
+  has no standalone std tarball for the non-native x86_64 ABI; the ebuild
+  skips it with an `ewarn` (the native pass installs the full toolchain).
+- The cryptography wheel dir is per-impl (`${T}/wheels-${EPYTHON}`) because
+  abi3 wheels from earlier impls in a shared dir would collide on install.
+- `profiles/x32/package.mask/maturin` masks upstream `dev-util/maturin-1.15.0`
+  (no x32 ring patches) so dependency chains resolve to the patched overlay
+  version.
