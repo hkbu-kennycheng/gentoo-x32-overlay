@@ -1,8 +1,14 @@
 --- a/src/builtin.c
 +++ b/src/builtin.c
-@@ -1,4 +1,4 @@
+@@ -1,4 +1,9 @@
 -#if __SIZEOF_POINTER__==4
+-# define _TIME_BITS 64
 +#if __SIZEOF_POINTER__==4 && !defined(__ILP32__)
- # define _TIME_BITS 64
++# ifndef _FILE_OFFSET_BITS
++#  define _FILE_OFFSET_BITS 64
++# endif
++# ifndef _TIME_BITS
++#  define _TIME_BITS 64
++# endif
  #endif
  #ifndef __sun__
